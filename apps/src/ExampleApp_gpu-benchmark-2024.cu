@@ -62,177 +62,215 @@ OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
 #include "Hello_gpu-benchmark-2024.hpp"
 
-FLAMEGPU_AGENT_FUNCTION(test_do_nothing, flamegpu::MessageNone, flamegpu::MessageNone) {
-    return flamegpu::ALIVE;
-}
-
-FLAMEGPU_INIT_FUNCTION(test_simple_force_create_agents) {
-  // Retrieve the host agent tools for agent sheep in the default state
-  flamegpu::HostAgentAPI cell = FLAMEGPU->agent("cell");
-
-  // Create 10 new cell agents
-  for (int i = 0; i < 3; ++i) {
-      flamegpu::HostNewAgentAPI new_cell = cell.newAgent();
-      new_cell.setVariable<float>("x", i * 0.5f);
-      new_cell.setVariable<float>("y", i * 0.5f);
-      new_cell.setVariable<float>("x_force", 0.0f);
-      new_cell.setVariable<float>("y_force", 0.0f);
-      new_cell.setVariable<float>("radius", 0.5f);
-  }
-}
-
-FLAMEGPU_AGENT_FUNCTION(test_output_location, flamegpu::MessageNone, flamegpu::MessageBruteForce) {
-    FLAMEGPU->message_out.setVariable<float>("x", FLAMEGPU->getVariable<float>("x"));
-    FLAMEGPU->message_out.setVariable<float>("y", FLAMEGPU->getVariable<float>("y"));
-    FLAMEGPU->message_out.setVariable<float>("radius", FLAMEGPU->getVariable<float>("radius"));
-    return flamegpu::ALIVE;
-}
-
-// Models repulsion force without division/apoptosis
-FLAMEGPU_AGENT_FUNCTION(test_compute_force_meineke_spring, flamegpu::MessageBruteForce, flamegpu::MessageNone) {
-    const float x = FLAMEGPU->getVariable<float>("x");
-    const float y = FLAMEGPU->getVariable<float>("y");
-    float x_force = 0.0;
-    float y_force = 0.0;
-    float radius = FLAMEGPU->getVariable<float>("radius");
-
-    for (const auto& message : FLAMEGPU->message_in) {
-        float other_x = message.getVariable<float>("x");
-        float other_y = message.getVariable<float>("y");
-        float other_radius = message.getVariable<float>("radius");
-        
-        // Compute unit distance
-        float x_dist = other_x - x;
-        float y_dist = other_y - y;
-        float distance_between_nodes = sqrt(x_dist * x_dist + y_dist * y_dist);
-
-        float unit_x = x_dist / distance_between_nodes;
-        float unit_y = y_dist / distance_between_nodes;
-        
-        // Only compute force if within cutoff distance and for positive distance
-        const float cutoff_length = 1.5f;
-        if (distance_between_nodes < cutoff_length && distance_between_nodes > 0.0f) {
-
-            // Compute rest length
-            const float rest_length = radius + other_radius; 
-            const float rest_length_final = rest_length;
-            
-            // TODO: Should check here if newly divided or apoptosis happening
-
-
-            // Compute the force
-            float overlap = distance_between_nodes - rest_length;
-            bool is_closer_than_rest_length = (overlap <= 0);
-            const float spring_stiffness = 15.0f;
-            const float multiplication_factor = 1.0f;
-
-            
-            // A reasonably stable simple force law
-            if (is_closer_than_rest_length) //overlap is negative
-            {
-                //assert(overlap > -rest_length_final);
-                x_force += multiplication_factor * spring_stiffness * unit_x * rest_length_final* log(1.0 + overlap/rest_length_final);
-                y_force  = multiplication_factor * spring_stiffness * unit_y * rest_length_final* log(1.0 + overlap/rest_length_final);
-            }
-            else
-            {
-                double alpha = 5.0;
-                x_force += multiplication_factor * spring_stiffness * unit_x * overlap * exp(-alpha * overlap/rest_length_final);
-                y_force += multiplication_factor * spring_stiffness * unit_y * overlap * exp(-alpha * overlap/rest_length_final);
-            }
-        }
-
-        
-    }
-
-    FLAMEGPU->setVariable<float>("x_force", x_force);        
-    FLAMEGPU->setVariable<float>("y_force", y_force);        
-
-    return flamegpu::ALIVE;
-}
+enum class SimulatorType {
+    CPU,
+    GPU
+};
 
 typedef struct ResultsRow {
     std::string type;
+    std::string dimensions;
     double box_size;
+    double mechanics_time;
     double run_time;
 } ResultsRow;
+
+using ResultsSet = std::vector<ResultsRow>;
+
+constexpr double END_TIME = 1.0;
 
 void WriteResultsToFile(std::vector<ResultsRow> results, std::string fileName) {
     std::ofstream results_file(fileName);
     for (auto& row : results) {
-        results_file << row.type << ", " << row.box_size << ", " << row.run_time << "\n";
+        results_file << row.type << ", " << row.dimensions << ", " << row.box_size << ", " << row.mechanics_time << ", " << row.run_time << "\n";
     }
     std::cout << "Results written to " << fileName << "\n";
 }
 
-void PerformGPUSim(const double size_of_box, std::vector<ResultsRow>& results) {
-    
-    std::cout << "Starting GPU sim with box size: " << size_of_box << "\n";
-    auto start_time = std::chrono::high_resolution_clock::now();
-    
+template<unsigned DIM>
+std::vector<std::array<float, DIM>> RunSim(std::vector<Node<DIM>*> nodes, SimulatorType type) {
+
     SimulationTime::Destroy();
     SimulationTime::Instance()->SetStartTime(0.0);
-    unsigned cells_across = size_of_box * 1.52;
-    double scaling = size_of_box/(double(cells_across-1));
 
-    // Create a simple 3D NodeBasedCellPopulation consisting of cells evenly spaced in a regular grid
-    std::vector<Node<2>*> nodes;
-    unsigned index = 0;
-    for (unsigned i=0; i<cells_across; i++)
-    {
-        for (unsigned j=0; j<cells_across; j++)
-        {
-            nodes.push_back(new Node<2>(index, false,  (double) i * scaling , (double) j * scaling));
-            index++;
-        }
-    }
-
-    NodesOnlyMesh<2> mesh;
+    NodesOnlyMesh<DIM> mesh;
     mesh.ConstructNodesWithoutMesh(nodes, 1.5);
 
     std::vector<CellPtr> cells;
     MAKE_PTR(TransitCellProliferativeType, p_transit_type);
-    CellsGenerator<UniformCellCycleModel, 2> cells_generator;
+    CellsGenerator<UniformCellCycleModel, DIM> cells_generator;
     cells_generator.GenerateBasicRandom(cells, mesh.GetNumNodes(), p_transit_type);
 
-    NodeBasedCellPopulation<2> node_based_cell_population(mesh, cells);
+    NodeBasedCellPopulation<DIM> node_based_cell_population(mesh, cells);
 
     // Set up cell-based simulation
-    OffLatticeSimulation<2> simulator(node_based_cell_population);
-    simulator.SetOutputDirectory("GPUNodeBased");
-    simulator.SetSamplingTimestepMultiple(12);
-    simulator.SetEndTime(1.0);
+    OffLatticeSimulation<DIM> simulator(node_based_cell_population);
+    if (type == SimulatorType::CPU) {
+        simulator.SetOutputDirectory("CPUNodeBased");
+    } else if (type == SimulatorType::GPU) {
+        simulator.SetOutputDirectory("GPUNodeBased");
+    }
+    simulator.SetEndTime(END_TIME); // 1 time step
+    
+    MAKE_PTR(GPUModifier<DIM>, gpuModifier);
+    MAKE_PTR(GeneralisedLinearSpringForce<DIM>, springForce);
 
-    MAKE_PTR(GPUModifier<2>, gpuModifier);
-    simulator.AddSimulationModifier(gpuModifier);
+    if (type == SimulatorType::CPU) {
+        springForce->SetCutOffLength(1.5);
+        simulator.AddForce(springForce);
+    } else {
+        simulator.AddSimulationModifier(gpuModifier);
+    }
 
     // Run simulation
     simulator.Solve();
+    
+    // Fetch results
+    std::vector<std::array<float, DIM>> locations;
+    for (unsigned int i = 0; i < nodes.size(); i++) {
+        const auto& loc = mesh.GetNode(0)->rGetLocation();
+        if constexpr (DIM == 2) {
+            locations.push_back({static_cast<float>(loc[0]), static_cast<float>(loc[1])});
+        }
+        if constexpr (DIM == 3) {
+            locations.push_back({static_cast<float>(loc[0]), static_cast<float>(loc[1]), static_cast<float>(loc[2])});
+        }
+    }
+    
 
     // Avoid memory leak
     for (unsigned i=0; i<nodes.size(); i++)
     {
         delete nodes[i];
     }
-
-    auto end_time = std::chrono::high_resolution_clock::now();
-    auto duration = std::chrono::duration_cast<std::chrono::milliseconds>(end_time - start_time);
     
-    ResultsRow row;
-    row.type = "gpu";
-    row.box_size = size_of_box;
-    row.run_time = duration.count();
-    results.push_back(row);
+    return locations;
 }
 
-void PerformCPUSim(const double size_of_box, std::vector<ResultsRow>& results) {
+std::vector<std::array<float, 2>> TwoParticlesOutOfRange2DCPU() {
+    std::vector<Node<2>*> nodes;
+    nodes.push_back(new Node<2>(0, false, -1.0, -0.0));
+    nodes.push_back(new Node<2>(1, false, 1.0, 0.0));
+
+    return RunSim<2>(nodes, SimulatorType::CPU);
+}
+
+
+std::vector<std::array<float, 2>> TwoParticlesOutOfRange2DGPU() {
     
-    std::cout << "Starting CPU sim with box size: " << size_of_box << "\n";
-    auto start_time = std::chrono::high_resolution_clock::now();
-    SimulationTime::Destroy();
-    SimulationTime::Instance()->SetStartTime(0.0);
-    unsigned cells_across = size_of_box * 1.52;
-    double scaling = size_of_box/(double(cells_across-1));
+    std::vector<Node<2>*> nodes;
+    nodes.push_back(new Node<2>(0, false, -1.0, -0.0));
+    nodes.push_back(new Node<2>(1, false, 1.0, 0.0));
+    
+    return RunSim<2>(nodes, SimulatorType::GPU);
+}
+
+std::vector<std::array<float, 3>> TwoParticlesOutOfRange3DCPU() {
+    std::vector<Node<3>*> nodes;
+    nodes.push_back(new Node<3>(0, false, -1.0, -0.0, 0.0));
+    nodes.push_back(new Node<3>(1, false, 1.0, 0.0, 0.0));
+
+    return RunSim<3>(nodes, SimulatorType::CPU);
+}
+
+
+std::vector<std::array<float, 3>> TwoParticlesOutOfRange3DGPU() {
+    
+    std::vector<Node<3>*> nodes;
+    nodes.push_back(new Node<3>(0, false, -1.0, -0.0, 0.0));
+    nodes.push_back(new Node<3>(1, false, 1.0, 0.0, 0.0));
+    
+    return RunSim<3>(nodes, SimulatorType::GPU);
+}
+
+
+std::vector<std::array<float, 2>> TwoParticlesInRange2DCPU() {
+
+    std::vector<Node<2>*> nodes;
+    nodes.push_back(new Node<2>(0, false, -0.2, -0.2));
+    nodes.push_back(new Node<2>(1, false, 0.2, 0.2));
+
+    return RunSim<2>(nodes, SimulatorType::CPU);
+}
+
+
+std::vector<std::array<float, 2>> TwoParticlesInRange2DGPU() {
+    
+    std::vector<Node<2>*> nodes;
+    nodes.push_back(new Node<2>(0, false, -0.2, -0.2));
+    nodes.push_back(new Node<2>(1, false, 0.2, 0.2));
+
+    return RunSim<2>(nodes, SimulatorType::GPU);
+}
+
+std::vector<std::array<float, 3>> TwoParticlesInRange3DCPU() {
+
+    std::vector<Node<3>*> nodes;
+    nodes.push_back(new Node<3>(0, false, -0.2, -0.2, -0.2));
+    nodes.push_back(new Node<3>(1, false, 0.2, 0.2, 0.2));
+
+    return RunSim<3>(nodes, SimulatorType::CPU);
+}
+
+
+std::vector<std::array<float, 3>> TwoParticlesInRange3DGPU() {
+    
+    std::vector<Node<3>*> nodes;
+    nodes.push_back(new Node<3>(0, false, -0.2, -0.2, -0.2));
+    nodes.push_back(new Node<3>(1, false, 0.2, 0.2, 0.2));
+
+    return RunSim<3>(nodes, SimulatorType::GPU);
+}
+
+template<unsigned DIM>
+double ComparePositions(const std::vector<std::array<float, DIM>>& v1, const std::vector<std::array<float, DIM>>& v2) {
+    assert(v1.size() == v2.size());
+
+    double totalDifference = 0.0;
+    for (int i = 0; i < v1.size(); i++) {
+        auto& p1 = v1[i];
+        auto& p2 = v2[i];
+        
+        for (int dim = 0; dim < DIM; dim++) {
+            totalDifference += std::abs(p2[dim] - p1[dim]);
+        }
+    }
+    
+    return totalDifference / v1.size();
+}
+
+double ValdiateTwoParticlesOutOfRange2D() {
+    auto cpuResults = TwoParticlesOutOfRange2DCPU(); 
+    auto gpuResults = TwoParticlesOutOfRange2DGPU();
+
+    return ComparePositions<2>(cpuResults, gpuResults);
+}
+
+double ValdiateTwoParticlesInRange2D() {
+    auto cpuResults = TwoParticlesInRange2DCPU(); 
+    auto gpuResults = TwoParticlesInRange2DGPU();
+
+    return ComparePositions<2>(cpuResults, gpuResults);
+}
+
+double ValdiateTwoParticlesOutOfRange3D() {
+    auto cpuResults = TwoParticlesOutOfRange3DCPU(); 
+    auto gpuResults = TwoParticlesOutOfRange3DGPU();
+
+    return ComparePositions<3>(cpuResults, gpuResults);
+}
+
+double ValdiateTwoParticlesInRange3D() {
+    auto cpuResults = TwoParticlesInRange3DCPU(); 
+    auto gpuResults = TwoParticlesInRange3DGPU();
+
+    return ComparePositions<3>(cpuResults, gpuResults);
+}
+
+double ValidateMultipleParticles(double box_size) {
+
+    unsigned cells_across = box_size * 1.52;
+    double scaling = box_size/(double(cells_across-1));
 
     // Create a simple 3D NodeBasedCellPopulation consisting of cells evenly spaced in a regular grid
     std::vector<Node<2>*> nodes;
@@ -246,25 +284,99 @@ void PerformCPUSim(const double size_of_box, std::vector<ResultsRow>& results) {
         }
     }
 
-    NodesOnlyMesh<2> mesh;
+    auto cpuResults = RunSim<2>(nodes, SimulatorType::CPU);
+    
+    nodes.clear();
+    index = 0;
+    for (unsigned i=0; i<cells_across; i++)
+    {
+        for (unsigned j=0; j<cells_across; j++)
+        {
+            nodes.push_back(new Node<2>(index, false,  (double) i * scaling , (double) j * scaling));
+            index++;
+        }
+    }
+
+    auto gpuResults = RunSim<2>(nodes, SimulatorType::GPU);
+
+    return ComparePositions<2>(cpuResults, gpuResults);
+    
+}
+
+void PerformForceValidation() {
+    std::cout << "Starting force validation...\n";
+    //auto multipleDiff = ValidateMultipleParticles(2);
+    //std::cout << "Multiple particles diff: " << multipleDiff << "\n";
+    auto outOfRangeDiff = ValdiateTwoParticlesOutOfRange2D();
+    std::cout << "Out of range diff: " << outOfRangeDiff << "\n";
+    auto inRangeDiff = ValdiateTwoParticlesInRange2D();
+    std::cout << "In range diff: " << inRangeDiff << "\n";
+    auto outOfRangeDiff3D = ValdiateTwoParticlesOutOfRange3D();
+    std::cout << "Out of range 3D diff: " << outOfRangeDiff3D << "\n";
+    auto inRangeDiff3D = ValdiateTwoParticlesInRange3D();
+    std::cout << "In range 3D diff: " << inRangeDiff3D << "\n";
+}
+
+template<unsigned DIM>
+void PerformBenchmarkSim(const double size_of_box, ResultsSet& results, SimulatorType type) {
+
+    std::string typeString = type == SimulatorType::CPU ? "CPU" : "GPU";
+    std::cout << "Starting " << typeString << " sim with box size: " << size_of_box << "\n";
+    auto start_time = std::chrono::high_resolution_clock::now();
+    
+    SimulationTime::Destroy();
+    SimulationTime::Instance()->SetStartTime(0.0);
+
+    unsigned cells_across = size_of_box * 1.52;
+    double scaling = size_of_box/(double(cells_across-1));
+
+    // Create a simple 3D NodeBasedCellPopulation consisting of cells evenly spaced in a regular grid
+    std::vector<Node<DIM>*> nodes;
+    unsigned index = 0;
+    for (unsigned i=0; i<cells_across; i++)
+    {
+        for (unsigned j=0; j<cells_across; j++)
+        {
+            if constexpr (DIM == 2) {
+                nodes.push_back(new Node<2>(index, false,  (double) i * scaling , (double) j * scaling));
+                index++;
+            }
+
+            if constexpr (DIM == 3) {
+                for (unsigned k = 0; k < cells_across; k++) {
+                    nodes.push_back(new Node<3>(index, false,  (double) i * scaling , (double) j * scaling, (double) k * scaling));
+                    index++;
+                }
+            }
+        }
+    }
+
+    NodesOnlyMesh<DIM> mesh;
     mesh.ConstructNodesWithoutMesh(nodes, 1.5);
 
     std::vector<CellPtr> cells;
     MAKE_PTR(TransitCellProliferativeType, p_transit_type);
-    CellsGenerator<UniformCellCycleModel, 2> cells_generator;
+    CellsGenerator<UniformCellCycleModel, DIM> cells_generator;
     cells_generator.GenerateBasicRandom(cells, mesh.GetNumNodes(), p_transit_type);
 
-    NodeBasedCellPopulation<2> node_based_cell_population(mesh, cells);
+    NodeBasedCellPopulation<DIM> node_based_cell_population(mesh, cells);
 
     // Set up cell-based simulation
-    OffLatticeSimulation<2> simulator(node_based_cell_population);
+    OffLatticeSimulation<DIM> simulator(node_based_cell_population);
     simulator.SetOutputDirectory("GPUNodeBased");
-    simulator.SetSamplingTimestepMultiple(12);
-    simulator.SetEndTime(1.0);
+    simulator.SetSamplingTimestepMultiple(500);
+    simulator.SetEndTime(END_TIME);
+    
+    MAKE_PTR(GeneralisedLinearSpringForce<DIM>, springForce);
+    MAKE_PTR(GPUModifier<DIM>, gpuModifier);
 
-    MAKE_PTR(GeneralisedLinearSpringForce<2>, springForce);
-    simulator.AddForce(springForce);
-
+    if (type == SimulatorType::CPU) {
+        springForce->SetCutOffLength(1.5);
+        simulator.AddForce(springForce);
+    } else {
+        simulator.AddSimulationModifier(gpuModifier);
+    }
+    
     // Run simulation
     simulator.Solve();
 
@@ -276,24 +388,48 @@ void PerformCPUSim(const double size_of_box, std::vector<ResultsRow>& results) {
 
     auto end_time = std::chrono::high_resolution_clock::now();
     auto duration = std::chrono::duration_cast<std::chrono::milliseconds>(end_time - start_time);
+
+    double mechanics_time = 0.0;
+    if (type == SimulatorType::GPU) {
+        auto& timingResults = gpuModifier->mTimingInfo; 
+        
+        for (auto& r : timingResults) {
+            mechanics_time += r[5];
+        }
+    } else {
+        for (auto& v : simulator.mechTimes) {
+            mechanics_time += v;
+        }
+    }
     
     ResultsRow row;
-    row.type = "cpu";
+    row.type = type == SimulatorType::CPU ? "cpu" : "gpu";
+    row.dimensions = DIM == 2 ? "2D" : "3D";
     row.box_size = size_of_box;
+    row.mechanics_time = mechanics_time;
     row.run_time = duration.count();
     results.push_back(row);
+
 }
 
 int main(int argc, char *argv[])
 {
     // This sets up PETSc and prints out copyright information, etc.
     ExecutableSupport::StandardStartup(&argc, &argv);
-    std::vector<double> box_sizes = {10.0, 20.0, 30.0, 40.0, 50.0, 100.0, 200.0, 300.0, 400.0, 500.0};
-    std::vector<ResultsRow> results;
-    for (auto box_size : box_sizes) {
-        PerformCPUSim(box_size, results);
-        PerformGPUSim(box_size, results);
+    // Perf benchmark
+    std::vector<double> box_sizes = {10.0, 20.0, 30.0, 40.0, 50.0};//, 100.0, 200.0, 300.0};//, 500.0, 750.0, 1000.0};
+    std::vector<double> box_sizes_3D = {3.0, 5.0, 10.0};//, 20.0, 30.0};//, 100.0, 200.0, 300.0};//, 500.0, 750.0, 1000.0};
+    ResultsSet results;
+    //for (auto box_size : box_sizes) {
+    //    PerformBenchmarkSim<2>(box_size, results, SimulatorType::CPU);
+    //    PerformBenchmarkSim<2>(box_size, results, SimulatorType::GPU);
+    //}
+    for (auto box_size : box_sizes_3D) {
+        PerformBenchmarkSim<3>(box_size, results, SimulatorType::CPU);
+        PerformBenchmarkSim<3>(box_size, results, SimulatorType::GPU);
     }
     WriteResultsToFile(results, "results.txt");
-    std::cout << "Benchmark complete\n";
+
+    // Validation
+    //PerformForceValidation();
 }
