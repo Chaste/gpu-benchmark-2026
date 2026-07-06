@@ -1,5 +1,7 @@
 # Chaste FLAME GPU Paper 2026
 
+The main benchmark code can be found in `/apps/src`
+
 ## Before Building
 
 ### Pre-requisites
