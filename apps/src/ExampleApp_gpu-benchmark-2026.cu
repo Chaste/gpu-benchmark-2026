@@ -60,7 +60,7 @@ OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 #include "SmartPointers.hpp"
 #include "SimulationTime.hpp"
 
-#include "Hello_gpu-benchmark-2024.hpp"
+#include "Hello_gpu-benchmark-2026.hpp"
 
 enum class SimulatorType {
     CPU,
@@ -111,7 +111,7 @@ std::vector<std::array<float, DIM>> RunSim(std::vector<Node<DIM>*> nodes, Simula
         simulator.SetOutputDirectory("GPUNodeBased");
     }
     simulator.SetEndTime(END_TIME); // 1 time step
-    
+
     MAKE_PTR(GPUModifier<DIM>, gpuModifier);
     MAKE_PTR(GeneralisedLinearSpringForce<DIM>, springForce);
 
@@ -124,7 +124,7 @@ std::vector<std::array<float, DIM>> RunSim(std::vector<Node<DIM>*> nodes, Simula
 
     // Run simulation
     simulator.Solve();
-    
+
     // Fetch results
     std::vector<std::array<float, DIM>> locations;
     for (unsigned int i = 0; i < nodes.size(); i++) {
@@ -136,14 +136,14 @@ std::vector<std::array<float, DIM>> RunSim(std::vector<Node<DIM>*> nodes, Simula
             locations.push_back({static_cast<float>(loc[0]), static_cast<float>(loc[1]), static_cast<float>(loc[2])});
         }
     }
-    
+
 
     // Avoid memory leak
     for (unsigned i=0; i<nodes.size(); i++)
     {
         delete nodes[i];
     }
-    
+
     return locations;
 }
 
@@ -157,11 +157,11 @@ std::vector<std::array<float, 2>> TwoParticlesOutOfRange2DCPU() {
 
 
 std::vector<std::array<float, 2>> TwoParticlesOutOfRange2DGPU() {
-    
+
     std::vector<Node<2>*> nodes;
     nodes.push_back(new Node<2>(0, false, -1.0, -0.0));
     nodes.push_back(new Node<2>(1, false, 1.0, 0.0));
-    
+
     return RunSim<2>(nodes, SimulatorType::GPU);
 }
 
@@ -175,11 +175,11 @@ std::vector<std::array<float, 3>> TwoParticlesOutOfRange3DCPU() {
 
 
 std::vector<std::array<float, 3>> TwoParticlesOutOfRange3DGPU() {
-    
+
     std::vector<Node<3>*> nodes;
     nodes.push_back(new Node<3>(0, false, -1.0, -0.0, 0.0));
     nodes.push_back(new Node<3>(1, false, 1.0, 0.0, 0.0));
-    
+
     return RunSim<3>(nodes, SimulatorType::GPU);
 }
 
@@ -195,7 +195,7 @@ std::vector<std::array<float, 2>> TwoParticlesInRange2DCPU() {
 
 
 std::vector<std::array<float, 2>> TwoParticlesInRange2DGPU() {
-    
+
     std::vector<Node<2>*> nodes;
     nodes.push_back(new Node<2>(0, false, -0.2, -0.2));
     nodes.push_back(new Node<2>(1, false, 0.2, 0.2));
@@ -214,7 +214,7 @@ std::vector<std::array<float, 3>> TwoParticlesInRange3DCPU() {
 
 
 std::vector<std::array<float, 3>> TwoParticlesInRange3DGPU() {
-    
+
     std::vector<Node<3>*> nodes;
     nodes.push_back(new Node<3>(0, false, -0.2, -0.2, -0.2));
     nodes.push_back(new Node<3>(1, false, 0.2, 0.2, 0.2));
@@ -230,38 +230,38 @@ double ComparePositions(const std::vector<std::array<float, DIM>>& v1, const std
     for (int i = 0; i < v1.size(); i++) {
         auto& p1 = v1[i];
         auto& p2 = v2[i];
-        
+
         for (int dim = 0; dim < DIM; dim++) {
             totalDifference += std::abs(p2[dim] - p1[dim]);
         }
     }
-    
+
     return totalDifference / v1.size();
 }
 
 double ValdiateTwoParticlesOutOfRange2D() {
-    auto cpuResults = TwoParticlesOutOfRange2DCPU(); 
+    auto cpuResults = TwoParticlesOutOfRange2DCPU();
     auto gpuResults = TwoParticlesOutOfRange2DGPU();
 
     return ComparePositions<2>(cpuResults, gpuResults);
 }
 
 double ValdiateTwoParticlesInRange2D() {
-    auto cpuResults = TwoParticlesInRange2DCPU(); 
+    auto cpuResults = TwoParticlesInRange2DCPU();
     auto gpuResults = TwoParticlesInRange2DGPU();
 
     return ComparePositions<2>(cpuResults, gpuResults);
 }
 
 double ValdiateTwoParticlesOutOfRange3D() {
-    auto cpuResults = TwoParticlesOutOfRange3DCPU(); 
+    auto cpuResults = TwoParticlesOutOfRange3DCPU();
     auto gpuResults = TwoParticlesOutOfRange3DGPU();
 
     return ComparePositions<3>(cpuResults, gpuResults);
 }
 
 double ValdiateTwoParticlesInRange3D() {
-    auto cpuResults = TwoParticlesInRange3DCPU(); 
+    auto cpuResults = TwoParticlesInRange3DCPU();
     auto gpuResults = TwoParticlesInRange3DGPU();
 
     return ComparePositions<3>(cpuResults, gpuResults);
@@ -285,7 +285,7 @@ double ValidateMultipleParticles(double box_size) {
     }
 
     auto cpuResults = RunSim<2>(nodes, SimulatorType::CPU);
-    
+
     nodes.clear();
     index = 0;
     for (unsigned i=0; i<cells_across; i++)
@@ -300,7 +300,7 @@ double ValidateMultipleParticles(double box_size) {
     auto gpuResults = RunSim<2>(nodes, SimulatorType::GPU);
 
     return ComparePositions<2>(cpuResults, gpuResults);
-    
+
 }
 
 void PerformForceValidation() {
@@ -323,7 +323,7 @@ void PerformBenchmarkSim(const double size_of_box, ResultsSet& results, Simulato
     std::string typeString = type == SimulatorType::CPU ? "CPU" : "GPU";
     std::cout << "Starting " << typeString << " sim with box size: " << size_of_box << "\n";
     auto start_time = std::chrono::high_resolution_clock::now();
-    
+
     SimulationTime::Destroy();
     SimulationTime::Instance()->SetStartTime(0.0);
 
@@ -366,7 +366,7 @@ void PerformBenchmarkSim(const double size_of_box, ResultsSet& results, Simulato
     simulator.SetOutputDirectory("GPUNodeBased");
     simulator.SetSamplingTimestepMultiple(500);
     simulator.SetEndTime(END_TIME);
-    
+
     MAKE_PTR(GeneralisedLinearSpringForce<DIM>, springForce);
     MAKE_PTR(GPUModifier<DIM>, gpuModifier);
 
@@ -376,7 +376,7 @@ void PerformBenchmarkSim(const double size_of_box, ResultsSet& results, Simulato
     } else {
         simulator.AddSimulationModifier(gpuModifier);
     }
-    
+
     // Run simulation
     simulator.Solve();
 
@@ -391,8 +391,8 @@ void PerformBenchmarkSim(const double size_of_box, ResultsSet& results, Simulato
 
     double mechanics_time = 0.0;
     if (type == SimulatorType::GPU) {
-        auto& timingResults = gpuModifier->mTimingInfo; 
-        
+        auto& timingResults = gpuModifier->mTimingInfo;
+
         for (auto& r : timingResults) {
             mechanics_time += r[5];
         }
@@ -401,7 +401,7 @@ void PerformBenchmarkSim(const double size_of_box, ResultsSet& results, Simulato
             mechanics_time += v;
         }
     }
-    
+
     ResultsRow row;
     row.type = type == SimulatorType::CPU ? "cpu" : "gpu";
     row.dimensions = DIM == 2 ? "2D" : "3D";
@@ -412,24 +412,45 @@ void PerformBenchmarkSim(const double size_of_box, ResultsSet& results, Simulato
 
 }
 
+void Perform2DBenchmark(const int repetitions) {
+    std::vector<double> box_sizes = {10.0, 20.0, 30.0, 40.0, 50.0, 100.0, 200.0, 300.0, 500.0, 750.0, 1000.0};
+
+    for (int repetition = 0; repetition < repetitions; repetition++) {
+        ResultsSet results;
+        for (auto box_size : box_sizes) {
+            PerformBenchmarkSim<2>(box_size, results, SimulatorType::CPU);
+            PerformBenchmarkSim<2>(box_size, results, SimulatorType::GPU);
+        }
+
+        WriteResultsToFile(results, "2d-benchmark-results-" + std::to_string(repetition) + ".txt");
+    }
+}
+
+void Perform3DBenchmark(const int repetitions) {
+    std::vector<double> box_sizes_3D = {3.0, 5.0, 10.0, 20.0, 30.0, 50.0, 100.0, 200.0, 300.0, 500.0, 750.0, 1000.0};
+
+    for (int repetition = 0; repetition < repetitions; repetition++) {
+        ResultsSet results;
+        for (auto box_size : box_sizes_3D) {
+            PerformBenchmarkSim<3>(box_size, results, SimulatorType::CPU);
+            PerformBenchmarkSim<3>(box_size, results, SimulatorType::GPU);
+        }
+
+        WriteResultsToFile(results, "3d-benchmark-results-" + std::to_string(repetition) + ".txt");
+    }
+}
+
+
+
 int main(int argc, char *argv[])
 {
     // This sets up PETSc and prints out copyright information, etc.
     ExecutableSupport::StandardStartup(&argc, &argv);
+
     // Perf benchmark
-    std::vector<double> box_sizes = {10.0, 20.0, 30.0, 40.0, 50.0};//, 100.0, 200.0, 300.0};//, 500.0, 750.0, 1000.0};
-    std::vector<double> box_sizes_3D = {3.0, 5.0, 10.0};//, 20.0, 30.0};//, 100.0, 200.0, 300.0};//, 500.0, 750.0, 1000.0};
-    ResultsSet results;
-    //for (auto box_size : box_sizes) {
-    //    PerformBenchmarkSim<2>(box_size, results, SimulatorType::CPU);
-    //    PerformBenchmarkSim<2>(box_size, results, SimulatorType::GPU);
-    //}
-    for (auto box_size : box_sizes_3D) {
-        PerformBenchmarkSim<3>(box_size, results, SimulatorType::CPU);
-        PerformBenchmarkSim<3>(box_size, results, SimulatorType::GPU);
-    }
-    WriteResultsToFile(results, "results.txt");
+    Perform2DBenchmark(10);
+    Perform3DBenchmark(10);
 
     // Validation
-    //PerformForceValidation();
+    PerformForceValidation();
 }

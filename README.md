@@ -1,9 +1,64 @@
-# A template user project for use with Chaste.
+# Chaste FLAME GPU Paper 2026
 
-You now simply log in to github, then click the big green "Use this template" button to use a copy of this repository as the basis of your own new repository under your github username/organisation (this 'template' status avoids complications with forks all being linked back to this repo).
+## Before Building
 
-Alternatively, if you aren't a github user, you can download a zip (see Releases button) and start your own repository with that.
+### Pre-requisites
+- Chaste-compatible operating system
+- NVIDIA GPU
+- NVIDIA CUDA toolkit installed
 
-Then see the [User Projects](https://chaste.github.io/docs/user-guides/user-projects/) guide page on the Chaste website for more information.
+### Setting up Chaste
 
-If you clone this repository, you should make sure to rename the template_project folder with your project name and run the 'setup_project.py' script to avoid conflicts if you have multiple projects.
+1. Set up chaste according to [its instructions](https://chaste.github.io/docs/installguides/).
+2. Switch to the branch containing the GPU-aware classes `git checkout flamegpu-3d-integration`
+
+### Setting up the Benchmark Repository
+
+1. Clone this repository into your chaste projects directory
+
+```
+cd projects
+git clone https://github.com/Chaste/gpu-benchmark-2026.git
+```
+
+## Build Instructions
+
+1. Create a build directory outside of the chaste source tree
+
+```
+mkdir build
+```
+
+2. Configure chaste to build with CUDA support and to build the `gpu-benchmark-2026` project.
+
+```
+cmake ../Chaste -DChaste_ENABLE_project_gpu-benchmark-2026=ON -DChaste_ENABLE_project_gpu-benchmark-2026_APPS=ON --compile-no-warning-as-error -DCMAKE_CUDA_ARCHITECTURES=61 -DCMAKE_BUILD_TYPE=Release -DFLAMEGPU_SEATBELTS=OFF
+```
+
+The `--compile-no-warning-as-error` flag is used as modern compilers issue new warnings which have not been fixed in the pinned FLAME GPU version.
+
+The `CMAKE_CUDA_ARCHITECTURES` flag should be set to a model that is compatible with your GPU and CUDA version.
+
+3. Build the project
+```
+make -jN project_gpu-benchmark-2026
+```
+where `N` is replaced by the number of threads you want to use to build.
+
+## Running the Benchmark
+
+The benchmark is run by calling the created executable. From the build directory, run
+
+```
+./projects/gpu-benchmark-2026/apps/ExampleApp_gpu-benchmark-2026.cu
+```
+
+## Generating Graphs
+
+Copy the produced data into the `data-and-results` folder in the benchmark repository.
+
+Run:
+
+```
+python3 generate-graphs.py
+```
