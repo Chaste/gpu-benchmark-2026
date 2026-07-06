@@ -412,24 +412,45 @@ void PerformBenchmarkSim(const double size_of_box, ResultsSet& results, Simulato
 
 }
 
+void Perform2DBenchmark(const int repetitions) {
+    std::vector<double> box_sizes = {10.0, 20.0, 30.0, 40.0, 50.0, 100.0, 200.0, 300.0, 500.0, 750.0, 1000.0};
+
+    for (int repetition = 0; repetition < repetitions; repetition++) {
+        ResultsSet results;
+        for (auto box_size : box_sizes) {
+            PerformBenchmarkSim<2>(box_size, results, SimulatorType::CPU);
+            PerformBenchmarkSim<2>(box_size, results, SimulatorType::GPU);
+        }
+
+        WriteResultsToFile(results, "2d-benchmark-results-" + std::to_string(repetition) + ".txt");
+    }
+}
+
+void Perform3DBenchmark(const int repetitions) {
+    std::vector<double> box_sizes_3D = {3.0, 5.0, 10.0, 20.0, 30.0, 50.0, 100.0, 200.0, 300.0, 500.0, 750.0, 1000.0};
+
+    for (int repetition = 0; repetition < repetitions; repetition++) {
+        ResultsSet results;
+        for (auto box_size : box_sizes_3D) {
+            PerformBenchmarkSim<3>(box_size, results, SimulatorType::CPU);
+            PerformBenchmarkSim<3>(box_size, results, SimulatorType::GPU);
+        }
+
+        WriteResultsToFile(results, "3d-benchmark-results-" + std::to_string(repetition) + ".txt");
+    }
+}
+
+
+
 int main(int argc, char *argv[])
 {
     // This sets up PETSc and prints out copyright information, etc.
     ExecutableSupport::StandardStartup(&argc, &argv);
+
     // Perf benchmark
-    std::vector<double> box_sizes = {10.0, 20.0, 30.0, 40.0, 50.0};//, 100.0, 200.0, 300.0};//, 500.0, 750.0, 1000.0};
-    std::vector<double> box_sizes_3D = {3.0, 5.0, 10.0};//, 20.0, 30.0};//, 100.0, 200.0, 300.0};//, 500.0, 750.0, 1000.0};
-    ResultsSet results;
-    //for (auto box_size : box_sizes) {
-    //    PerformBenchmarkSim<2>(box_size, results, SimulatorType::CPU);
-    //    PerformBenchmarkSim<2>(box_size, results, SimulatorType::GPU);
-    //}
-    for (auto box_size : box_sizes_3D) {
-        PerformBenchmarkSim<3>(box_size, results, SimulatorType::CPU);
-        PerformBenchmarkSim<3>(box_size, results, SimulatorType::GPU);
-    }
-    WriteResultsToFile(results, "results.txt");
+    Perform2DBenchmark(10);
+    Perform3DBenchmark(10);
 
     // Validation
-    //PerformForceValidation();
+    PerformForceValidation();
 }
