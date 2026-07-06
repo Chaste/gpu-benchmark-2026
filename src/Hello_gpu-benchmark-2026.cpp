@@ -33,20 +33,20 @@ OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
 */
 
-#include "Hello_gpu-benchmark-2024.hpp"
+#include "Hello_gpu-benchmark-2026.hpp"
 #include "Exception.hpp"
 
-Hello_gpubenchmark2024::Hello_gpubenchmark2024(const std::string& rMessage)
+Hello_gpubenchmark2026::Hello_gpubenchmark2026(const std::string& rMessage)
     : mMessage(rMessage)
 {
 }
 
-std::string Hello_gpubenchmark2024::GetMessage()
+std::string Hello_gpubenchmark2026::GetMessage()
 {
     return mMessage;
 }
 
-void Hello_gpubenchmark2024::Complain(const std::string& rComplaint)
+void Hello_gpubenchmark2026::Complain(const std::string& rComplaint)
 {
     EXCEPTION(rComplaint);
 }
