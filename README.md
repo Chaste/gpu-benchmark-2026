@@ -57,10 +57,12 @@ The benchmark is run by calling the created executable. From the build directory
 
 ## Generating Graphs
 
-Copy the produced data into the `data-and-results` folder in the benchmark repository.
+Navigate to the `chaste-flamegpu-paper-results` directory
 
 Run:
 
 ```
 python3 generate-graphs.py
 ```
+
+This uses the data produced for the paper to generate the relevant figures. The data used by the script is processed data. For simulations which were repeated multiple times, only the aggregate data (means and errors) was retained. Errors are either stored in a column in the results csv files or in separate csv files depending on the specific dataset.
