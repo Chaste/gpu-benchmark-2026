@@ -3,15 +3,17 @@ import seaborn as sns
 import matplotlib.pyplot as plt
 import matplotlib.patches as mpatches
 import matplotlib as mpl
-import random
 
-sns.set_theme()#palette='viridis')
+sns.set_theme()
 mpl.rcParams['figure.dpi'] = 300
-marker_style = dict(marker='D', markersize=4, markeredgewidth=0, ci="sd")
+# NB: no `ci=` here — it is deprecated and, when present, silently overrides the
+# explicit `errorbar=` passed on each call. Each plot passes `errorbar=` itself.
+marker_style = dict(marker='D', markersize=4, markeredgewidth=0)
 
 
 def plot_mechanics_proportion():
     # Mechanics proportion
+    plt.figure()
     mechanics_prop_raw_data = pd.read_csv('mechanics-prop.csv')
     mech_errors = mechanics_prop_raw_data['Error']
     mechanics_prop_plot = sns.lineplot(data=mechanics_prop_raw_data, x='Box Size', y='Time Spent on Mechanics (%)', errorbar="se", **marker_style)
@@ -20,10 +22,12 @@ def plot_mechanics_proportion():
     mechanics_prop_plot.set_ylabel("Time spent on mechanics (%)")
     mechanics_prop_plot.errorbar(mechanics_prop_raw_data['Box Size'], mechanics_prop_raw_data['Time Spent on Mechanics (%)'], yerr=mech_errors, color='blue', alpha=0.8)
     plt.savefig('./mech-time.png')
+    plt.close()
 
 # Timings
 
 def plot_cpu_time():
+    plt.figure()
     timings_raw_data = pd.read_csv('timings.csv', na_values=['#DIV/0!'])
     timings_raw_data['Population'] = timings_raw_data['Box Width'] * timings_raw_data['Box Width']
 
@@ -37,14 +41,16 @@ def plot_cpu_time():
     cpu_time_plot.errorbar(cput_data['Population'], cput_data['Proportion CPU Time'], yerr=cput_errors, color='orange', alpha=0.8)
     plt.ticklabel_format(style='plain', axis='x')
     plt.savefig('./cpu-time.png')
+    plt.close()
 
 def plot_gpu_time():
+    plt.figure()
     timings_raw_data = pd.read_csv('timings.csv', na_values=['#DIV/0!'])
     timings_raw_data['Population'] = timings_raw_data['Box Width'] * timings_raw_data['Box Width']
     timings_raw_data['Sim Prop'] = 1.0
     timings_raw_data['Transfer Prop'] = timings_raw_data['Transfer Prop'] + timings_raw_data['Wrangle Prop']
 
-    cmap = plt.cm.get_cmap('tab10')
+    cmap = plt.get_cmap('tab10')
     top_bar = sns.barplot(data=timings_raw_data[timings_raw_data['Box Width'] >= 200], x='Population', y='Sim Prop', color=cmap(0), linewidth=0)
     middle_bar = sns.barplot(data=timings_raw_data[timings_raw_data['Box Width'] >= 200], x='Population', y='Transfer Prop', color=cmap(1), linewidth=0)
     bottom_bar = sns.barplot(data=timings_raw_data[timings_raw_data['Box Width'] >= 200], x='Population', y='Wrangle Prop', color=cmap(2), linewidth=0)
@@ -75,29 +81,39 @@ def plot_total_runtime():
         timings_raw_data['HTD Wrangle'],
     ]
 
-    plt.stackplot(timings_raw_data['Population'], total_runtime_y_data, labels=['Device to host data translation', 'Device to host transfer', 'Host to device data translation', 'Host to device transfer', 'Simulation', 'CPU time'], linewidth=0)
+    # Labels must follow the same order as total_runtime_y_data above.
+    total_runtime_labels = [
+        'Simulation',
+        'CPU time',
+        'Device to host data translation',
+        'Device to host transfer',
+        'Host to device transfer',
+        'Host to device data translation',
+    ]
+
+    plt.stackplot(timings_raw_data['Population'], total_runtime_y_data, labels=total_runtime_labels, linewidth=0)
     plt.legend(loc='upper left')
     plt.ticklabel_format(style='plain', axis='x')
     plt.xlabel('Population')
     plt.ylabel('Time (ms)')
     plt.xlim(left=0, right=1000000)
-    #fig.axes[0].set_xscale('log')
     fig.set_tight_layout(True)
     plt.savefig('./overall-time.png')
     plt.close()
 
 # Performance
 def plot_mechanics_speedup():
+    plt.figure()
     raw_data = pd.read_csv('results.csv')
     raw_data.loc[raw_data['Dimensions'] == '2D', 'Population'] = pow(raw_data[raw_data['Dimensions'] == '2D']['Box width'], 2)
     raw_data.loc[raw_data['Dimensions'] == '3D', 'Population'] = pow(raw_data[raw_data['Dimensions'] == '3D']['Box width'], 3)
 
     ## Mechanics Speedup
-    mechs_data_2D = raw_data[raw_data['Dimensions'] == '2D'][raw_data['Simulator'] == 'gpu']
+    mechs_data_2D = raw_data[(raw_data['Dimensions'] == '2D') & (raw_data['Simulator'] == 'gpu')]
     mechs_errors_2D = pd.read_csv('mech_errors_2d.csv')['error']
     mech_speedup_plot = sns.lineplot(data=raw_data[raw_data['Dimensions'] == '2D'], x='Population', y='Mechanics Speedup', label='2D', errorbar="se", **marker_style)
     mech_speedup_plot.errorbar(mechs_data_2D['Population'], mechs_data_2D['Mechanics Speedup'], yerr=mechs_errors_2D, color='b', alpha=0.8)
-    mechs_data_3D = raw_data[raw_data['Dimensions'] == '3D'][raw_data['Simulator'] == 'gpu']
+    mechs_data_3D = raw_data[(raw_data['Dimensions'] == '3D') & (raw_data['Simulator'] == 'gpu')]
     mechs_errors_3D = pd.read_csv('mech_errors_3d.csv')['error']
     mech_speedup_plot = sns.lineplot(data=raw_data[raw_data['Dimensions'] == '3D'], x='Population', y='Mechanics Speedup', label='3D', errorbar="se", **marker_style)
     mech_speedup_plot.errorbar(mechs_data_3D['Population'], mechs_data_3D['Mechanics Speedup'], yerr=mechs_errors_3D, color='orange', alpha=0.8)
@@ -108,31 +124,7 @@ def plot_mechanics_speedup():
     plt.close()
 
 def plot_total_speedup():
-    raw_data = pd.read_csv('results.csv')
-    raw_data.loc[raw_data['Dimensions'] == '2D', 'Population'] = pow(raw_data[raw_data['Dimensions'] == '2D']['Box width'], 2)
-    raw_data.loc[raw_data['Dimensions'] == '3D', 'Population'] = pow(raw_data[raw_data['Dimensions'] == '3D']['Box width'], 3)
-
-    ## Total speedup
-    l1d = raw_data.query('Simulator == "gpu" & Dimensions == "2D"')
-    l2d = raw_data.query('Simulator == "gpu" & Dimensions == "2D"')
-    l3d = raw_data.query('Simulator == "gpu" & Dimensions == "3D"')
-    l4d = raw_data.query('Simulator == "gpu" & Dimensions == "3D"')
-
-    raw_errors = pd.read_csv('total_speedup_errors.csv')
-    mechs_errors_2D = pd.read_csv('mech_errors_2d.csv')['error']
-    mech_speedup_plot = sns.lineplot(data=raw_data[raw_data['Dimensions'] == '2D'], x='Population', y='Mechanics Speedup', label='2D', errorbar="se", **marker_style)
-    mech_speedup_plot.errorbar(mechs_data_2D['Population'], mechs_data_2D['Mechanics Speedup'], yerr=mechs_errors_2D, color='b', alpha=0.8)
-    mechs_data_3D = raw_data[raw_data['Dimensions'] == '3D'][raw_data['Simulator'] == 'gpu']
-    mechs_errors_3D = pd.read_csv('mech_errors_3d.csv')['error']
-    mech_speedup_plot = sns.lineplot(data=raw_data[raw_data['Dimensions'] == '3D'], x='Population', y='Mechanics Speedup', label='3D', errorbar="se", **marker_style)
-    mech_speedup_plot.errorbar(mechs_data_3D['Population'], mechs_data_3D['Mechanics Speedup'], yerr=mechs_errors_3D, color='orange', alpha=0.8)
-    plt.ticklabel_format(style='plain', axis='x')
-    plt.xlabel('Population')
-    plt.ylabel('Speedup')
-    plt.savefig('./mech-speedup.png')
-    plt.close()
-
-def plot_total_speedup():
+    plt.figure()
     raw_data = pd.read_csv('results.csv')
     raw_data.loc[raw_data['Dimensions'] == '2D', 'Population'] = pow(raw_data[raw_data['Dimensions'] == '2D']['Box width'], 2)
     raw_data.loc[raw_data['Dimensions'] == '3D', 'Population'] = pow(raw_data[raw_data['Dimensions'] == '3D']['Box width'], 3)
@@ -165,6 +157,7 @@ def plot_total_speedup():
     plt.xlabel('Population')
     plt.ylabel('Speedup')
     plt.savefig('./overall-speedup.png')
+    plt.close()
 
 
 # Produce the plots
