@@ -1,19 +1,22 @@
-"""Generate figures for the GPU-simulator study.
+"""Generate publication-quality performance figures for the GPU-simulator study.
+
+This replaces the earlier set of six standalone plots with two coherent
+multi-panel figures, and refines the styling to journal standards:
 
     Figure 1 (fig-profiling):  runtime profiling, 2x2
-        (a) proportion of runtime spent on mechanics      [line, log x]
-        (b) proportion of runtime spent on CPU activities [line, log x]
-        (c) composition of GPU runtime                    [stacked bar]
-        (d) absolute runtime by stage                     [stacked area, linear x]
+        (A) proportion of runtime spent on mechanics      [line, log x]
+        (B) proportion of runtime spent on CPU activities [line, log x]
+        (C) composition of GPU runtime                    [stacked bar]
+        (D) absolute runtime by stage                     [stacked area, linear x]
 
     Figure 2 (fig-speedup):    speedup, 1x2
-        (a) mechanics-step speedup, 2D and 3D             [line, log x]
-        (b) actual vs maximum theoretical speedup         [line, log x]
+        (A) overall speedup: actual vs maximum theoretical   [line, log x]
+        (B) mechanics-step speedup, 2D and 3D                [line, log x]
 
 Each figure is written as both a vector PDF (for submission) and a 300-dpi PNG
 (for preview). Run as a script with no arguments::
 
-    graphs.py
+    python graphs.py
 
 Abbreviations (used in the stage labels of the profiling figure)
     D2H = Device to Host   (CSV columns prefixed 'DTH')
@@ -235,10 +238,10 @@ def _panel_total_runtime(ax):
 
 def make_profiling_figure():
     fig, axes = plt.subplots(2, 2, figsize=(7.2, 6.0), constrained_layout=True)
-    _panel_mechanics_proportion(axes[0, 0]); _panel_label(axes[0, 0], '(a)')
-    _panel_cpu_proportion(axes[0, 1]);       _panel_label(axes[0, 1], '(b)')
-    _panel_gpu_composition(axes[1, 0]);      _panel_label(axes[1, 0], '(c)')
-    _panel_total_runtime(axes[1, 1]);        _panel_label(axes[1, 1], '(d)')
+    _panel_mechanics_proportion(axes[0, 0]); _panel_label(axes[0, 0], '(A)')
+    _panel_cpu_proportion(axes[0, 1]);       _panel_label(axes[0, 1], '(B)')
+    _panel_gpu_composition(axes[1, 0]);      _panel_label(axes[1, 0], '(C)')
+    _panel_total_runtime(axes[1, 1]);        _panel_label(axes[1, 1], '(D)')
     _save(fig, 'fig-profiling')
 
 
@@ -289,8 +292,12 @@ def _panel_total_speedup(ax):
 
 def make_speedup_figure():
     fig, axes = plt.subplots(1, 2, figsize=(7.2, 3.2), constrained_layout=True)
-    _panel_mechanics_speedup(axes[0]); _panel_label(axes[0], '(a)')
-    _panel_total_speedup(axes[1]);     _panel_label(axes[1], '(b)')
+    _panel_total_speedup(axes[0]);     _panel_label(axes[0], '(A)')
+    _panel_mechanics_speedup(axes[1]); _panel_label(axes[1], '(B)')
     _save(fig, 'fig-speedup')
+
+
+# --------------------------------------------------------------------------- #
+if __name__ == '__main__':
     make_profiling_figure()
     make_speedup_figure()
