@@ -1,98 +1,171 @@
-"""
-Generate a figure showing the error in position of two particles connected by a spring,
-for different numbers of substeps per timestep. Based on the mechanics model used in
-Chaste for node-based simulations. An explicit solve with a very high number of
-iterations (i.e. a very fine timestep) is used as the ground truth, and the error
-in position is computed against this.
+"""Generate the mechanical-substep convergence figure (manuscript Figure 3).
+
+Two particles connected by a spring (the node-based mechanics model used in
+Chaste) are integrated forward with an explicit Euler scheme, using a range of
+substep counts per biological timestep. A very finely resolved solve
+(GROUND_TRUTH_ITERATIONS substeps) is taken as the ground truth, and the
+relative error in the position of one particle is computed against it over time.
+
+The figure is written as both a vector PDF (for submission) and a 300-dpi PNG
+(for preview). Run as a script with no arguments::
+
+    python generate_mechanics_error_figure.py
+
+Styling is kept consistent with the profiling and speedup figures (sans-serif
+font, light grid, no top/right spines, scientific-notation axis, vector output).
+The one deliberate departure is colour: the substep counts form an *ordered*
+family, so they are drawn with a perceptually uniform sequential colour map
+(darker = fewer substeps, larger error) rather than the categorical Okabe-Ito
+palette used for the 2D/3D series elsewhere.
+
+Note on the y-axis: the plotted quantity is a fraction (ground truth - trial) /
+trial, i.e. a relative error, not a percentage. The axis is labelled accordingly;
+if a true percentage is wanted, scale the errors by 100 and update the caption.
 """
 
 import math
-import seaborn as sns
+
+import numpy as np
 import matplotlib.pyplot as plt
 import matplotlib as mpl
+from matplotlib.ticker import ScalarFormatter
 
-mpl.rcParams['figure.dpi'] = 120
-sns.set_theme()
-marker_style = dict(marker='D', markersize=4, markeredgewidth=0)
+# --------------------------------------------------------------------------- #
+# CONFIG
+# --------------------------------------------------------------------------- #
+SAVE_PDF = True
+SAVE_PNG = True
 
 GROUND_TRUTH_ITERATIONS = 20000
-trial_substeps = [1, 2, 5, 10, 20, 60, 120, 300, GROUND_TRUTH_ITERATIONS]
-results = {}
+TRIAL_SUBSTEPS = [1, 2, 5, 10, 20, 60, 120, 300]
 
-for trial_substep in trial_substeps:
+# Two-particle spring model parameters
+INITIAL_POSITIONS = (-0.7, 0.7)     # (p1, p2)
+REST_LENGTHS = (0.5, 0.5)           # (r1, r2)
+SPRING_CONSTANT = 15.0
+END_TIME = 0.5                      # hours
+DT = 1.0 / 120.0                   # biological timestep
 
-    # Initial positions
-    p1 = -0.7
-    p2 = 0.7
+# --------------------------------------------------------------------------- #
+# Global style — matches make_publication_figures.py
+# --------------------------------------------------------------------------- #
+mpl.rcParams.update({
+    'figure.dpi':        300,
+    'savefig.dpi':       300,
+    'savefig.bbox':      'tight',
+    'font.family':       'sans-serif',
+    'font.sans-serif':   ['Arial', 'Helvetica', 'Liberation Sans',
+                          'Nimbus Sans', 'DejaVu Sans'],
+    'mathtext.fontset':  'custom',
+    'mathtext.rm':       'Liberation Sans',
+    'mathtext.it':       'Liberation Sans:italic',
+    'mathtext.bf':       'Liberation Sans:bold',
+    'mathtext.sf':       'Liberation Sans',
+    'mathtext.cal':      'Liberation Sans:italic',
+    'mathtext.tt':       'Liberation Mono',
+    'font.size':         10,
+    'axes.titlesize':    11,
+    'axes.labelsize':    11,
+    'xtick.labelsize':   9,
+    'ytick.labelsize':   9,
+    'legend.fontsize':   8,
+    'legend.frameon':    True,
+    'legend.framealpha': 0.9,
+    'legend.edgecolor':  '0.8',
+    'lines.linewidth':   1.4,
+    'axes.linewidth':    0.8,
+    'axes.grid':         True,
+    'grid.color':        '0.85',
+    'grid.linewidth':    0.6,
+    'axes.axisbelow':    True,
+    'axes.spines.top':   False,
+    'axes.spines.right': False,
+})
 
-    # Rest lengths
-    r1 = 0.5
-    r2 = 0.5
 
-    # Spring constant
-    k = 15.0
-
-    # Time parameters
-    t = 0
-    end_time = 0.5
-    dt = 1.0 / 120.0
-
-    # Produce the time points for plotting
-    times = []
-    while t < end_time:
+# --------------------------------------------------------------------------- #
+# Simulation
+# --------------------------------------------------------------------------- #
+def timepoints():
+    """Return the list of biological-timestep times, in hours."""
+    times, t = [], 0.0
+    while t < END_TIME:
         times.append(t)
-        t += dt
-    t  = 0
+        t += DT
+    return times
 
-    substeps = trial_substep
-    results[trial_substep] = []
 
-    while t < end_time:
+def simulate(substeps):
+    """Integrate the two-particle spring model and return p1 at each timestep.
 
-        # For each substep, calculate the force and update the positions of the two particles
-        for substep in range(0, substeps):
-            dist = p2 - p1
-            rest_length = r1 + r2
-            overlap = dist - rest_length
-            f = 0
+    Each biological timestep of length DT is advanced with `substeps` explicit
+    Euler substeps.
+    """
+    p1, p2 = INITIAL_POSITIONS
+    r1, r2 = REST_LENGTHS
+    k = SPRING_CONSTANT
+    rest_length = r1 + r2
 
+    positions, t = [], 0.0
+    while t < END_TIME:
+        for _ in range(substeps):
+            overlap = (p2 - p1) - rest_length
             if overlap < 0:
                 f = k * rest_length * math.log(1.0 + (overlap / rest_length))
             else:
-                f = k * overlap * math.exp(-5.0  * (overlap / rest_length))
-
+                f = k * overlap * math.exp(-5.0 * (overlap / rest_length))
             # Euler integration
-            p1 += f * (dt / substeps)
-            p2 -= f * (dt / substeps)
-
-        t += dt
-        results[trial_substep].append(p1)
-
-# Initialise arrays to store the errors
-errors = {}
-
-for trial_substep in trial_substeps:
-    errors[trial_substep] = []
-
-# Compute the percentage error in position for each trial substep compared to the ground truth
-i = 0
-for v in results[GROUND_TRUTH_ITERATIONS]:
-    for trial_substep in trial_substeps:
-        if trial_substep != GROUND_TRUTH_ITERATIONS:
-            actual_val = results[trial_substep][i]
-            errors[trial_substep].append((v - actual_val) / actual_val)
-    i += 1
+            p1 += f * (DT / substeps)
+            p2 -= f * (DT / substeps)
+        t += DT
+        positions.append(p1)
+    return positions
 
 
-# Plot the errors
-sns.set_theme()
+def relative_errors():
+    """Return {substeps: [relative error at each timestep]} against ground truth."""
+    ground_truth = simulate(GROUND_TRUTH_ITERATIONS)
+    errors = {}
+    for substeps in TRIAL_SUBSTEPS:
+        trial = simulate(substeps)
+        errors[substeps] = [(gt - val) / val for gt, val in zip(ground_truth, trial)]
+    return errors
 
-plt.figure()
-for trial_substep in trial_substeps:
-    if trial_substep != GROUND_TRUTH_ITERATIONS:
-        plt.plot(times, errors[trial_substep], label=str(trial_substep), **marker_style)
-plt.xlabel("Time (hours)")
-plt.ylabel("Percentage error in position")
-plt.legend(title="Mechanical substeps per timestep", loc="lower right", fontsize=8,
-           title_fontsize=8, markerscale=0.7, labelspacing=0.3, handlelength=1.5, borderpad=0.5)
-plt.savefig("multiple-steps.png", bbox_inches="tight")
+
+# --------------------------------------------------------------------------- #
+# Figure
+# --------------------------------------------------------------------------- #
+def make_figure():
+    times = timepoints()
+    errors = relative_errors()
+
+    # Ordered family -> perceptually uniform sequential colours (dark = fewer
+    # substeps). Truncated to avoid the palest, low-contrast end of the map.
+    cmap = plt.get_cmap('viridis')
+    colours = [cmap(x) for x in np.linspace(0.0, 0.9, len(TRIAL_SUBSTEPS))]
+
+    fig, ax = plt.subplots(figsize=(6.2, 4.0), constrained_layout=True)
+    for substeps, colour in zip(TRIAL_SUBSTEPS, colours):
+        ax.plot(times, errors[substeps], color=colour, label=str(substeps))
+
+    ax.set_xlabel('Time (hours)')
+    ax.set_ylabel('Relative error in position')
+    ax.set_xlim(left=0.0)
+
+    # Scientific notation for the small error values.
+    fmt = ScalarFormatter(useMathText=True)
+    fmt.set_powerlimits((0, 0))
+    ax.yaxis.set_major_formatter(fmt)
+
+    ax.legend(title='Mechanical substeps per timestep', loc='lower right',
+              ncol=2, labelspacing=0.3, handlelength=1.6, borderpad=0.6)
+
+    if SAVE_PDF:
+        fig.savefig('./fig-mechanics-error.pdf')
+    if SAVE_PNG:
+        fig.savefig('./fig-mechanics-error.png')
+    plt.close(fig)
+
+
+if __name__ == '__main__':
+    make_figure()
