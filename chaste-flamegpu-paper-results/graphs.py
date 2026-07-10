@@ -160,10 +160,11 @@ def _save(fig, stem):
 # Figure 1 — runtime profiling (2x2)
 # --------------------------------------------------------------------------- #
 def _panel_mechanics_proportion(ax):
-    data = pd.read_csv('mechanics-prop.csv')
-    population = data['Box Size'] ** 2                      # common x-axis
-    ax.errorbar(population, data['Time Spent on Mechanics (%)'], yerr=data['Error'],
-                color=C2D, marker=MARKER, **ERRORBAR_KW)
+    df = load_results()
+    cpu2d = df[(df['Simulator'] == 'cpu') & (df['Dimensions'] == '2D')].copy()
+    cpu2d = cpu2d.sort_values('Population Size')
+    proportion = 100.0 * cpu2d['Mechanics Time'] / cpu2d['Total Time']
+    ax.plot(cpu2d['Population Size'], proportion, color=C2D, marker=MARKER)
     ax.set_ylim(0, 100)
     ax.set_xlabel('Population')
     ax.set_ylabel('Time on mechanics (%)')
