@@ -1,22 +1,28 @@
-"""Generate publication-quality performance figures for the GPU-simulator study.
+"""Generate publication-quality figures for the GPU-simulator study.
 
-This replaces the earlier set of six standalone plots with two coherent
-multi-panel figures, and refines the styling to journal standards:
+This produces all three manuscript figures from a single script:
 
-    Figure 1 (fig-profiling):  runtime profiling, 2x2
+    Figure 1 (fig-profiling):       runtime profiling, 2x2
         (A) proportion of runtime spent on mechanics      [line, log x]
         (B) proportion of runtime spent on CPU activities [line, log x]
         (C) composition of GPU runtime                    [stacked bar]
         (D) absolute runtime by stage                     [stacked area, linear x]
 
-    Figure 2 (fig-speedup):    speedup, 1x2
+    Figure 2 (fig-speedup):         speedup, 1x2
         (A) overall speedup: actual vs maximum theoretical   [line, log x]
         (B) mechanics-step speedup, 2D and 3D                [line, log x]
+
+    Figure 3 (fig-mechanics-error): mechanical-substep convergence
+        relative position error over time, one line per substep count
 
 Each figure is written as both a vector PDF (for submission) and a 300-dpi PNG
 (for preview). Run as a script with no arguments::
 
     python graphs.py
+
+Figures 1 and 2 read the profiling/speedup CSVs (timings.csv, results.csv and
+the four *_errors_*.csv files). Figure 3 is self-contained: it integrates the
+two-particle spring model directly, so it needs no input files.
 
 Abbreviations (used in the stage labels of the profiling figure)
     D2H = Device to Host   (CSV columns prefixed 'DTH')
@@ -37,9 +43,14 @@ Presentation choices (all easily reverted; see the CONFIG block):
     axis) with an explicit scientific-notation offset. The stacked-bar panel is
     categorical, so its populations are shown against a common 10**5 factor.
   * Both proportion panels are shown as percentages for consistency.
-  * A colourblind-friendly palette (Okabe-Ito) is used, with 2D and 3D drawn in
-    the same two colours across every panel.
+  * A colourblind-friendly palette (Okabe-Ito) is used for the 2D/3D series,
+    with 2D and 3D drawn in the same two colours across every panel. Figure 3 is
+    the deliberate exception: its substep counts form an *ordered* family, so
+    they use a perceptually uniform sequential colour map (darker = fewer
+    substeps, larger error) rather than the categorical palette.
 """
+
+import math
 
 import numpy as np
 import pandas as pd
@@ -72,6 +83,15 @@ STAGE_COLOURS = {
     'Host to device transfer':           OKABE['orange'],
     'Host to device data translation':   OKABE['purple'],
 }
+
+# Figure 3 — two-particle spring model (self-contained; no input files).
+GROUND_TRUTH_ITERATIONS = 20000
+TRIAL_SUBSTEPS = [1, 2, 5, 10, 20, 60, 120, 300]
+INITIAL_POSITIONS = (-0.7, 0.7)     # (p1, p2)
+REST_LENGTHS = (0.5, 0.5)           # (r1, r2)
+SPRING_CONSTANT = 15.0
+END_TIME = 0.5                      # hours
+DT = 1.0 / 120.0                    # biological timestep
 
 # --------------------------------------------------------------------------- #
 # Global style — deliberately not seaborn's default theme.
@@ -299,6 +319,85 @@ def make_speedup_figure():
 
 
 # --------------------------------------------------------------------------- #
+# Figure 3 — mechanical-substep convergence (self-contained simulation)
+# --------------------------------------------------------------------------- #
+def _timepoints():
+    """Return the list of biological-timestep times, in hours."""
+    times, t = [], 0.0
+    while t < END_TIME:
+        times.append(t)
+        t += DT
+    return times
+
+
+def _simulate(substeps):
+    """Integrate the two-particle spring model and return p1 at each timestep.
+
+    Each biological timestep of length DT is advanced with `substeps` explicit
+    Euler substeps, using the same overlapping-spheres force law as the main
+    simulator (equations (4)-(5) of the manuscript).
+    """
+    p1, p2 = INITIAL_POSITIONS
+    r1, r2 = REST_LENGTHS
+    k = SPRING_CONSTANT
+    rest_length = r1 + r2
+
+    positions, t = [], 0.0
+    while t < END_TIME:
+        for _ in range(substeps):
+            overlap = (p2 - p1) - rest_length
+            if overlap < 0:
+                f = k * rest_length * math.log(1.0 + (overlap / rest_length))
+            else:
+                f = k * overlap * math.exp(-5.0 * (overlap / rest_length))
+            # Euler integration
+            p1 += f * (DT / substeps)
+            p2 -= f * (DT / substeps)
+        t += DT
+        positions.append(p1)
+    return positions
+
+
+def _relative_errors():
+    """Return {substeps: [relative error at each timestep]} against ground truth."""
+    ground_truth = _simulate(GROUND_TRUTH_ITERATIONS)
+    errors = {}
+    for substeps in TRIAL_SUBSTEPS:
+        trial = _simulate(substeps)
+        errors[substeps] = [(gt - val) / val for gt, val in zip(ground_truth, trial)]
+    return errors
+
+
+def make_mechanics_error_figure():
+    times = _timepoints()
+    errors = _relative_errors()
+
+    # Ordered family -> perceptually uniform sequential colours (dark = fewer
+    # substeps). Truncated to avoid the palest, low-contrast end of the map.
+    cmap = plt.get_cmap('viridis')
+    colours = [cmap(x) for x in np.linspace(0.0, 0.9, len(TRIAL_SUBSTEPS))]
+
+    fig, ax = plt.subplots(figsize=(6.2, 4.0), constrained_layout=True)
+    for substeps, colour in zip(TRIAL_SUBSTEPS, colours):
+        ax.plot(times, errors[substeps], color=colour, label=str(substeps))
+
+    ax.set_xlabel('Time (hours)')
+    ax.set_ylabel('Relative error in position')
+    ax.set_xlim(left=0.0)
+
+    # Scientific notation for the small error values.
+    fmt = ScalarFormatter(useMathText=True)
+    fmt.set_powerlimits((0, 0))
+    ax.yaxis.set_major_formatter(fmt)
+
+    ax.legend(title='Mechanical substeps per timestep', loc='lower right',
+              ncol=2, labelspacing=0.3, handlelength=1.6, borderpad=0.6)
+
+    _save(fig, 'fig-mechanics-error')
+
+
+# --------------------------------------------------------------------------- #
 if __name__ == '__main__':
     make_profiling_figure()
     make_speedup_figure()
+    make_mechanics_error_figure()
